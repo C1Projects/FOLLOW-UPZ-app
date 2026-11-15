@@ -93,6 +93,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button id="imp">Import CSV into current tab</button>
     <button id="exp">Export encrypted backup</button>
     <button id="cfg">Reminder time</button>
+    <button id="sset">Sync settings</button>
+    <button id="snow">Sync now</button>
     <button id="lk">Lock</button>
     <button id="mc">Close</button>
   </div>
@@ -115,7 +117,8 @@ async function seal(){const iv=crypto.getRandomValues(new Uint8Array(12));
   return JSON.stringify({v:1,salt:b64(salt),iv:b64(iv),ct:b64(ct)})}
 async function open(blob,p){const o=JSON.parse(blob);salt=unb(o.salt);key=await derive(p,salt);
   const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb(o.iv)},key,unb(o.ct));return JSON.parse(D.decode(pt))}
-async function persist(){localStorage.setItem(LS,await seal())}
+async function save(){localStorage.setItem(LS,await seal())}
+async function persist(){await save();clearTimeout(tm);if(cfg.token)tm=setTimeout(sync,2000)}
 
 const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
 const addDays=(iso,n)=>{const d=new Date(iso+"T12:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
@@ -128,12 +131,12 @@ const has=!!localStorage.getItem(LS);
 $("#lockmsg").textContent=has?"Enter your passphrase to unlock.":"Create a passphrase. It encrypts your data and never leaves this device. If you forget it, your data can't be recovered.";
 if(!has)$("#pw2w").classList.remove("hide");
 $("#unlock").onclick=async()=>{const p=$("#pw").value;$("#lockerr").textContent="";
-  if(!p)return;
+  if(!p)return;pass=p;
   try{
     if(has){db=await open(localStorage.getItem(LS),p)}
     else{if(p.length<8)throw "Use at least 8 characters.";if(p!==$("#pw2").value)throw "Passphrases don't match.";
       salt=crypto.getRandomValues(new Uint8Array(16));key=await derive(p,salt);await persist()}
-    $("#lock").classList.add("hide");$("#app").classList.remove("hide");render();
+    $("#lock").classList.add("hide");$("#app").classList.remove("hide");render();loadCfg().then(sync);
   }catch(e){$("#lockerr").textContent=typeof e==="string"?e:"Wrong passphrase."}};
 $("#pw").onkeydown=$("#pw2").onkeydown=e=>{if(e.key==="Enter")$("#unlock").click()};
 $("#lk").onclick=()=>location.reload();
@@ -186,13 +189,13 @@ $("#save").onclick=async()=>{if(!$("#name").value.trim())return $("#name").focus
   if(!cad&&!$("#dueD").value)o.due="";
   o.upd=Date.now();if(!editing)db.contacts.push(o);
   await persist();$("#ed").close();render()};
-$("#del").onclick=async()=>{if(!confirm("Delete this contact?"))return;db.contacts=db.contacts.filter(c=>c!==editing);await persist();$("#ed").close();render()};
+$("#del").onclick=async()=>{if(!confirm("Delete this contact?"))return;db.contacts=db.contacts.filter(c=>c!==editing);(db.deleted||={})[editing.id]=Date.now();await persist();$("#ed").close();render()};
 
 /* Menu, CSV, export, settings */
 $("#menu").onclick=()=>$("#mn").showModal();$("#mc").onclick=()=>$("#mn").close();
 $("#exp").onclick=async()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([await seal()],{type:"application/json"}));a.download="data.enc.json";a.click();$("#mn").close()};
 $("#cfg").onclick=async()=>{const h=prompt("Hour to send reminders (0-23, New York time):",db.settings.hour);
-  if(h!==null&&+h>=0&&+h<=23&&h!==""){db.settings.hour=+h;await persist();toast("Reminder time saved")}};
+  if(h!==null&&+h>=0&&+h<=23&&h!==""){db.settings.hour=+h;db.settings.upd=Date.now();await persist();toast("Reminder time saved")}};
 $("#imp").onclick=()=>$("#file").click();
 function parseCSV(t){const r=[];let row=[],f="",q=false;for(let i=0;i<t.length;i++){const c=t[i];
   if(q){if(c==='"'){if(t[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
@@ -206,6 +209,60 @@ $("#file").onchange=async e=>{const fl=e.target.files[0];if(!fl)return;const row
     for(const k in idx)o[k]=idx[k]>=0?(r[idx[k]]||"").trim():"";if(!o.name)continue;
     o.last="";o.due=addDays(today(),o.cad);db.contacts.push(o);n++}
   await persist();render();$("#mn").close();e.target.value="";toast(`Imported ${n} contacts`)};
+
+/* ---------- GitHub sync ---------- */
+let pass="",cfg={repo:"",token:""},rsha=null,busy=false,again=false,tm;
+async function saveCfg(){const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,E.encode(JSON.stringify(cfg)));
+  localStorage.setItem("contacts.cfg",JSON.stringify({iv:b64(iv),ct:b64(ct)}))}
+async function loadCfg(){const s=localStorage.getItem("contacts.cfg");if(!s)return;
+  try{const o=JSON.parse(s);cfg=JSON.parse(D.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:unb(o.iv)},key,unb(o.ct))))}catch{}}
+const ghf=(p,o={})=>fetch(`https://api.github.com/repos/${cfg.repo}/contents/${p}`,{cache:"no-store",...o,
+  headers:{Authorization:"Bearer "+cfg.token,Accept:"application/vnd.github+json"}});
+const put=(p,text,sha,msg)=>ghf(p,{method:"PUT",body:JSON.stringify({message:msg,content:btoa(unescape(encodeURIComponent(text))),...(sha?{sha}:{})})});
+function merge(r){
+  const del={...(r.deleted||{}),...(db.deleted||{})};
+  for(const id in (r.deleted||{}))del[id]=Math.max(r.deleted[id],(db.deleted||{})[id]||0);
+  const best={};for(const c of [...db.contacts,...(r.contacts||[])])if(!best[c.id]||(c.upd||0)>(best[c.id].upd||0))best[c.id]=c;
+  db.contacts=Object.values(best).filter(c=>!(del[c.id]>=(c.upd||0)));
+  db.deleted=del;
+  if((r.settings?.upd||0)>(db.settings.upd||0))db.settings=r.settings}
+async function pull(){const r=await ghf("data.enc.json");
+  if(r.status===404){rsha=null;return}
+  if(r.status===401||r.status===403)throw "GitHub rejected the token. Check its repo access.";
+  if(!r.ok)throw "GitHub error "+r.status;
+  const j=await r.json();rsha=j.sha;
+  let remote;try{remote=await open(atob(j.content.replace(/\s/g,"")),pass)}
+  catch{throw "Can't decrypt the synced data. Use the same passphrase as your other device."}
+  merge(remote)}
+async function pushAll(){
+  let ok=false;
+  for(let i=0;i<2&&!ok;i++){
+    const r=await put("data.enc.json",await seal(),rsha,"Update data");
+    if(r.ok){rsha=(await r.json()).content.sha;ok=true}
+    else if(r.status===409||r.status===422){await pull();await save()}
+    else throw "GitHub error "+r.status}
+  if(!ok)throw "Sync conflict. Try Sync now again.";
+  const items=db.contacts.filter(c=>c.due).map(c=>({id:c.id,first:c.name.split(" ")[0],due:c.due}));
+  const text=JSON.stringify({hour:db.settings.hour,tz:db.settings.tz,items},null,1);
+  const g=await ghf("reminders.json");let sha;
+  if(g.ok){const j=await g.json();sha=j.sha;
+    if(decodeURIComponent(escape(atob(j.content.replace(/\s/g,""))))===text)return}
+  const r=await put("reminders.json",text,sha,"Update reminders");
+  if(!r.ok)throw "GitHub error "+r.status}
+async function sync(manual){
+  if(!cfg.token||!cfg.repo){if(manual===true)toast("Add sync settings first");return}
+  if(busy){again=true;return}
+  busy=true;
+  try{await pull();await save();await saveCfg();render();await pushAll();if(manual===true)toast("Synced")}
+  catch(e){toast(typeof e==="string"?e:"Sync failed. Check your connection.")}
+  busy=false;if(again){again=false;sync()}}
+$("#sset").onclick=async()=>{
+  const repo=prompt("Private data repo (owner/name):",cfg.repo||"");if(repo===null)return;
+  const token=prompt("Fine-grained token (contents read/write on that repo):",cfg.token||"");if(token===null)return;
+  cfg={repo:repo.trim(),token:token.trim()};await saveCfg();$("#mn").close();sync(true)};
+$("#snow").onclick=()=>{$("#mn").close();sync(true)};
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&!$("#app").classList.contains("hide"))sync()});
 </script>
 </body>
 </html>
