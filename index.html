@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Contacts</title>
+<style>
+:root{--bg:#f2f4f0;--card:#fff;--ink:#1b2a29;--mute:#66756f;--line:#d9dfd8;--acc:#0f6b63;--accink:#fff;--warn:#b4531a;--r:10px;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#121a19;--card:#1b2625;--ink:#e6eeea;--mute:#8fa19a;--line:#2d3b39;--acc:#4cb8ac;--accink:#0c1413;--warn:#e8925a;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "Avenir Next",Avenir,"Segoe UI",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:8px 14px}
+button.p{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button.g{border:0;background:none;color:var(--mute)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+label{display:block;font-size:.85rem;color:var(--mute);margin:10px 0 3px}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+h1{font:600 1.25rem Georgia,"Iowan Old Style",serif;margin:0 8px 0 0}
+.tabs button{border-radius:0;border:0;border-bottom:2px solid transparent;background:none;padding:6px 10px;color:var(--mute)}
+.tabs button.on{color:var(--ink);border-color:var(--acc);font-weight:600}
+.sp{flex:1}
+#q{max-width:200px}
+main{padding:16px}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(260px,1fr);gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:8px}
+.col{scroll-snap-align:start;min-width:0}
+.col h2{font:600 .95rem Georgia,serif;margin:0 0 8px;display:flex;justify-content:space-between}
+.col h2 span{color:var(--mute);font-family:inherit;font-weight:400}
+.list{display:grid;gap:8px;max-width:640px}
+.board .list{max-width:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px 12px;cursor:pointer}
+.card b{display:block}
+.sub{color:var(--mute);font-size:.88rem}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px}
+.due{font-size:.82rem;color:var(--mute)}
+.due.over{color:var(--warn);font-weight:600}
+.empty{color:var(--mute);font-size:.9rem;padding:10px 2px}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--ink);width:min(520px,94vw);max-height:92vh;padding:18px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+#lock{max-width:380px;margin:12vh auto;padding:0 20px}
+#lock h1{font-size:1.7rem}
+.err{color:var(--warn);min-height:1.3em;font-size:.9rem}
+.hide{display:none!important}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:.9rem}
+</style>
+</head>
+<body>
+<section id="lock">
+  <h1>Contacts</h1>
+  <p class="sub" id="lockmsg"></p>
+  <label for="pw">Passphrase</label>
+  <input id="pw" type="password" autocomplete="off">
+  <div id="pw2w" class="hide"><label for="pw2">Confirm passphrase</label><input id="pw2" type="password" autocomplete="off"></div>
+  <p class="err" id="lockerr"></p>
+  <button class="p" id="unlock">Unlock</button>
+</section>
+
+<div id="app" class="hide">
+  <header>
+    <h1>Contacts</h1>
+    <nav class="tabs"><button data-m="biz" class="on">Business</button><button data-m="friend">Friends</button></nav>
+    <span class="sp"></span>
+    <input id="q" type="search" placeholder="Search" aria-label="Search">
+    <button id="due">Due only</button>
+    <button class="p" id="add">Add</button>
+    <button class="g" id="menu" aria-label="Menu">⋯</button>
+  </header>
+  <main id="main"></main>
+</div>
+
+<dialog id="ed"><form method="dialog" id="f" onsubmit="return false">
+  <b id="edt"></b>
+  <label for="name">Name</label><input id="name" required>
+  <div class="two"><div><label for="company">Company</label><input id="company"></div><div><label for="role">Role</label><input id="role"></div></div>
+  <div class="two"><div><label for="phone">Phone</label><input id="phone" type="tel"></div><div><label for="email">Email</label><input id="email" type="email"></div></div>
+  <div class="two"><div><label for="city">City</label><input id="city"></div><div><label for="link">Profile link</label><input id="link" type="url" placeholder="https://linkedin.com/in/…"></div></div>
+  <div class="two"><div id="stagew"><label for="stage">Stage</label><select id="stage"><option value="cold">Cold lead</option><option value="warm">Warm lead</option><option value="booked">Booked</option><option value="repeat">Repeat client</option></select></div>
+  <div><label for="cad">Follow up every</label><select id="cad"><option value="0">No reminder</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">1 month</option><option value="60">2 months</option><option value="90">3 months</option><option value="180">6 months</option><option value="x">Custom (days)…</option></select></div></div>
+  <div id="cxw" class="hide"><label for="cx">Days between follow-ups</label><input id="cx" type="number" min="1"></div>
+  <div class="two"><div><label for="last">Last contacted</label><input id="last" type="date"></div><div><label for="dueD">Next follow-up</label><input id="dueD" type="date"></div></div>
+  <label for="notes">Notes</label><textarea id="notes" rows="3"></textarea>
+  <div class="acts"><button class="p" id="save">Save</button><button id="cancel">Cancel</button><span class="sp"></span><button class="g" id="del">Delete</button></div>
+</form></dialog>
+
+<dialog id="mn">
+  <b>Menu</b>
+  <div class="acts" style="flex-direction:column;align-items:stretch">
+    <button id="imp">Import CSV into current tab</button>
+    <button id="exp">Export encrypted backup</button>
+    <button id="cfg">Reminder time</button>
+    <button id="lk">Lock</button>
+    <button id="mc">Close</button>
+  </div>
+  <input type="file" id="file" accept=".csv,text/csv" class="hide">
+</dialog>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s), E=new TextEncoder(), D=new TextDecoder();
+const STAGES=[["cold","Cold leads"],["warm","Warm leads"],["booked","Booked"],["repeat","Repeat clients"]];
+const LS="contacts.enc.v1";
+let db={contacts:[],settings:{hour:10,tz:"America/New_York"}}, key=null, salt=null, mode="biz", dueOnly=false, editing=null;
+
+const b64=a=>btoa(String.fromCharCode(...new Uint8Array(a)));
+const unb=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function derive(p,s){const m=await crypto.subtle.importKey("raw",E.encode(p),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt:s,iterations:250000,hash:"SHA-256"},m,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
+async function seal(){const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,E.encode(JSON.stringify(db)));
+  return JSON.stringify({v:1,salt:b64(salt),iv:b64(iv),ct:b64(ct)})}
+async function open(blob,p){const o=JSON.parse(blob);salt=unb(o.salt);key=await derive(p,salt);
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb(o.iv)},key,unb(o.ct));return JSON.parse(D.decode(pt))}
+async function persist(){localStorage.setItem(LS,await seal())}
+
+const today=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+const addDays=(iso,n)=>{const d=new Date(iso+"T12:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+const esc=s=>String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const uid=()=>crypto.randomUUID();
+function toast(t){const e=document.createElement("div");e.className="toast";e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),2200)}
+
+/* Lock screen */
+const has=!!localStorage.getItem(LS);
+$("#lockmsg").textContent=has?"Enter your passphrase to unlock.":"Create a passphrase. It encrypts your data and never leaves this device. If you forget it, your data can't be recovered.";
+if(!has)$("#pw2w").classList.remove("hide");
+$("#unlock").onclick=async()=>{const p=$("#pw").value;$("#lockerr").textContent="";
+  if(!p)return;
+  try{
+    if(has){db=await open(localStorage.getItem(LS),p)}
+    else{if(p.length<8)throw "Use at least 8 characters.";if(p!==$("#pw2").value)throw "Passphrases don't match.";
+      salt=crypto.getRandomValues(new Uint8Array(16));key=await derive(p,salt);await persist()}
+    $("#lock").classList.add("hide");$("#app").classList.remove("hide");render();
+  }catch(e){$("#lockerr").textContent=typeof e==="string"?e:"Wrong passphrase."}};
+$("#pw").onkeydown=$("#pw2").onkeydown=e=>{if(e.key==="Enter")$("#unlock").click()};
+$("#lk").onclick=()=>location.reload();
+
+/* Rendering */
+const isOver=c=>c.due&&c.due<=today();
+function dueLabel(c){if(!c.due)return"";const n=Math.round((new Date(c.due)-new Date(today()))/864e5);
+  return n<0?`Overdue ${-n}d`:n===0?"Due today":`In ${n}d`}
+function card(c){return `<div class="card" data-id="${c.id}"><b>${esc(c.name)}</b>
+  <div class="sub">${esc([c.role,c.company].filter(Boolean).join(" at "))}${c.city?` · ${esc(c.city)}`:""}</div>
+  <div class="row"><span class="due ${isOver(c)?"over":""}">${dueLabel(c)}</span>${c.due?`<button data-done="${c.id}">Done, reached out</button>`:""}</div></div>`}
+function render(){
+  const q=$("#q").value.toLowerCase();
+  let list=db.contacts.filter(c=>c.type===mode&&(!q||Object.values(c).join(" ").toLowerCase().includes(q))&&(!dueOnly||isOver(c)));
+  list.sort((a,b)=>(a.due||"9").localeCompare(b.due||"9")||a.name.localeCompare(b.name));
+  $("#due").style.borderColor=dueOnly?"var(--acc)":"";
+  const m=$("#main");
+  if(mode==="biz"){m.innerHTML=`<div class="board">${STAGES.map(([k,t])=>{const l=list.filter(c=>c.stage===k);
+    return `<section class="col"><h2>${t}<span>${l.length}</span></h2><div class="list">${l.map(card).join("")||'<div class="empty">Nobody here yet.</div>'}</div></section>`}).join("")}</div>`}
+  else m.innerHTML=`<div class="list">${list.map(card).join("")||'<div class="empty">No friends yet. Tap Add to start.</div>'}</div>`;
+}
+document.addEventListener("click",async e=>{
+  const d=e.target.closest("[data-done]");
+  if(d){e.stopPropagation();const c=db.contacts.find(x=>x.id===d.dataset.done);
+    c.last=today();c.due=c.cad?addDays(c.last,c.cad):"";c.upd=Date.now();await persist();render();toast("Marked done");return}
+  const k=e.target.closest(".card");if(k)openEd(k.dataset.id);
+});
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{mode=b.dataset.m;
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));render()});
+$("#q").oninput=render;$("#due").onclick=()=>{dueOnly=!dueOnly;render()};
+
+/* Editor */
+const F=["name","company","role","phone","email","city","link","notes","last"];
+function openEd(id){editing=id?db.contacts.find(c=>c.id===id):null;const c=editing||{cad:mode==="biz"?14:14,stage:"cold"};
+  $("#edt").textContent=editing?"Edit contact":(mode==="biz"?"New business contact":"New friend");
+  F.forEach(f=>$("#"+f).value=c[f]||"");
+  $("#stagew").classList.toggle("hide",(editing?editing.type:mode)!=="biz");
+  $("#stage").value=c.stage||"cold";
+  const std=["0","7","14","30","60","90","180"];const cv=String(c.cad??14);
+  $("#cad").value=std.includes(cv)?cv:"x";$("#cx").value=std.includes(cv)?"":cv;$("#cxw").classList.toggle("hide",std.includes(cv));
+  $("#dueD").value=c.due||"";$("#del").classList.toggle("hide",!editing);$("#ed").showModal()}
+$("#add").onclick=()=>openEd();
+$("#cad").onchange=()=>$("#cxw").classList.toggle("hide",$("#cad").value!=="x");
+$("#cancel").onclick=()=>$("#ed").close();
+$("#save").onclick=async()=>{if(!$("#name").value.trim())return $("#name").focus();
+  const cad=$("#cad").value==="x"?+$("#cx").value||0:+$("#cad").value;
+  const o=editing||{id:uid(),type:mode};F.forEach(f=>o[f]=$("#"+f).value.trim());
+  o.stage=o.type==="biz"?$("#stage").value:"";o.cad=cad;
+  const prev=o.due;o.due=$("#dueD").value||(cad?addDays(o.last||today(),cad):"");
+  if(!cad&&!$("#dueD").value)o.due="";
+  o.upd=Date.now();if(!editing)db.contacts.push(o);
+  await persist();$("#ed").close();render()};
+$("#del").onclick=async()=>{if(!confirm("Delete this contact?"))return;db.contacts=db.contacts.filter(c=>c!==editing);await persist();$("#ed").close();render()};
+
+/* Menu, CSV, export, settings */
+$("#menu").onclick=()=>$("#mn").showModal();$("#mc").onclick=()=>$("#mn").close();
+$("#exp").onclick=async()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([await seal()],{type:"application/json"}));a.download="data.enc.json";a.click();$("#mn").close()};
+$("#cfg").onclick=async()=>{const h=prompt("Hour to send reminders (0-23, New York time):",db.settings.hour);
+  if(h!==null&&+h>=0&&+h<=23&&h!==""){db.settings.hour=+h;await persist();toast("Reminder time saved")}};
+$("#imp").onclick=()=>$("#file").click();
+function parseCSV(t){const r=[];let row=[],f="",q=false;for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c==='"'){if(t[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+  else if(c==='"')q=true;else if(c===",")row.push(f),f="";
+  else if(c==="\n"||c==="\r"){if(c==="\r"&&t[i+1]==="\n")i++;row.push(f);r.push(row);row=[];f=""}else f+=c}
+  if(f||row.length){row.push(f);r.push(row)}return r.filter(x=>x.some(v=>v.trim()))}
+const MAP={name:/^(name|person|full name|contact)/i,company:/company|organi/i,role:/role|title|position/i,phone:/phone|mobile|cell/i,email:/e-?mail/i,city:/city|location/i,link:/link|linkedin|url|profile/i,notes:/note/i};
+$("#file").onchange=async e=>{const fl=e.target.files[0];if(!fl)return;const rows=parseCSV(await fl.text());const h=rows.shift().map(x=>x.trim());
+  const idx={};for(const k in MAP)idx[k]=h.findIndex(x=>MAP[k].test(x));
+  let n=0;for(const r of rows){const o={id:uid(),type:mode,stage:mode==="biz"?"cold":"",cad:mode==="biz"?30:14,upd:Date.now()};
+    for(const k in idx)o[k]=idx[k]>=0?(r[idx[k]]||"").trim():"";if(!o.name)continue;
+    o.last="";o.due=addDays(today(),o.cad);db.contacts.push(o);n++}
+  await persist();render();$("#mn").close();e.target.value="";toast(`Imported ${n} contacts`)};
+</script>
+</body>
+</html>
